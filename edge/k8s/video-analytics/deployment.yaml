@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: video-analytics
+  namespace: video-analytics
+  labels:
+    app.kubernetes.io/name: video-analytics
+    app.kubernetes.io/part-of: azure-iot-demo
+  annotations:
+    # Flux Image Automation will update the image tag in this annotation block.
+    # The marker comment below tells Flux which field to update.
+    fluxcd.io/automated: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: video-analytics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: video-analytics
+    spec:
+      containers:
+        - name: video-analytics
+          # {"$imagepolicy": "flux-system:video-analytics"}
+          image: aiotdemoacr.azurecr.io/video-analytics:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: video-analytics-config
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+      # Pull images from ACR using a workload-identity or imagePullSecret.
+      # When using AIO with ACR, use the managed identity configured during
+      # infrastructure deployment (see infra/modules/aio.bicep).
+      imagePullSecrets:
+        - name: acr-pull-secret
+      restartPolicy: Always

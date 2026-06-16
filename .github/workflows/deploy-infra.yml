@@ -1,0 +1,126 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "infra/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "infra/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+
+permissions:
+  contents: read
+  id-token: write       # OIDC login
+  pull-requests: write  # post Bicep what-if results as PR comments
+
+env:
+  RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}          # e.g. rg-azure-iot-demo
+  DEPLOYMENT_NAME: azure-iot-demo-${{ github.run_id }}
+
+jobs:
+  # ── Validate / What-If ──────────────────────────────────────────────────────
+  validate:
+    name: Bicep Validate & What-If
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate Bicep
+        uses: azure/arm-deploy@v2
+        with:
+          scope: resourcegroup
+          resourceGroupName: ${{ env.RESOURCE_GROUP }}
+          template: infra/main.bicep
+          parameters: infra/parameters/dev.bicepparam
+          deploymentName: ${{ env.DEPLOYMENT_NAME }}-validate
+          deploymentMode: Validate
+          failOnStdErr: false
+
+      - name: What-If
+        id: whatif
+        run: |
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters infra/parameters/dev.bicepparam \
+            --name "$DEPLOYMENT_NAME-whatif" \
+            --no-pretty-print \
+          | tee /tmp/whatif.txt
+          echo "whatif<<EOF" >> "$GITHUB_OUTPUT"
+          cat /tmp/whatif.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Post What-If to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### 🔍 Bicep What-If Results\n\`\`\`\n${{ steps.whatif.outputs.whatif }}\n\`\`\``;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+  # ── Deploy ──────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'dev' }}
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.ref_name == 'main' || github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep
+        id: deploy
+        uses: azure/arm-deploy@v2
+        with:
+          scope: resourcegroup
+          resourceGroupName: ${{ env.RESOURCE_GROUP }}
+          template: infra/main.bicep
+          parameters: infra/parameters/dev.bicepparam
+          deploymentName: ${{ env.DEPLOYMENT_NAME }}
+          failOnStdErr: false
+
+      - name: Job summary
+        run: |
+          echo "### ✅ Infrastructure deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Output | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| IoT Hub | \`${{ steps.deploy.outputs.iotHubName }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ACR | \`${{ steps.deploy.outputs.acrLoginServer }}\` |" >> "$GITHUB_STEP_SUMMARY"

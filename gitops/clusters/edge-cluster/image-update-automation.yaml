@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Flux Image Automation Controller – ImageUpdateAutomation
+#
+# When a new image tag is selected by the ImagePolicy, this resource
+# automatically:
+#   1. Updates the image tag in edge/k8s/video-analytics/deployment.yaml
+#      (at the line annotated with the {"$imagepolicy":…} marker).
+#   2. Commits the change to the Git repository.
+#   3. Flux then reconciles the cluster to deploy the new image.
+#
+# This eliminates the need to manually SSH into edge devices to update
+# running containers.
+# ---------------------------------------------------------------------------
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageUpdateAutomation
+metadata:
+  name: video-analytics
+  namespace: flux-system
+spec:
+  interval: 1m
+  sourceRef:
+    kind: GitRepository
+    name: azure-iot-demo
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: flux-image-automation
+        email: flux@azure-iot-demo
+      messageTemplate: |
+        chore: update video-analytics image to {{range .Updated.Images}}{{.}}{{end}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: ./edge/k8s

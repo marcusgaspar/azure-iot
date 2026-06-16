@@ -1,0 +1,63 @@
+# AIO MQTT Broker configuration for the video-analytics namespace.
+#
+# Azure IoT Operations deploys an MQ broker cluster-wide.  This
+# BrokerListener exposes an unauthenticated port for in-cluster workloads
+# in dev/test environments.  For production, enable TLS and authentication.
+#
+# API reference:
+# https://learn.microsoft.com/azure/iot-operations/manage-mqtt-broker/overview-iot-mq
+---
+apiVersion: mq.iotoperations.azure.com/v1beta1
+kind: Broker
+metadata:
+  name: default
+  namespace: azure-iot-operations
+spec:
+  mode: distributed
+  cardinality:
+    backendChain:
+      partitions: 2
+      redundancyFactor: 2
+      workers: 2
+    frontend:
+      replicas: 2
+      workers: 2
+---
+apiVersion: mq.iotoperations.azure.com/v1beta1
+kind: BrokerListener
+metadata:
+  name: non-tls-listener
+  namespace: azure-iot-operations
+spec:
+  brokerRef: default
+  authenticationEnabled: false
+  authorizationEnabled: false
+  port: 1883
+  serviceName: aio-broker
+  serviceType: ClusterIp
+---
+# DataPipeline: forward video-analytics detections to Azure IoT Hub
+apiVersion: dataprocessor.iotoperations.azure.com/v1alpha1
+kind: Pipeline
+metadata:
+  name: video-analytics-pipeline
+  namespace: azure-iot-operations
+spec:
+  enabled: true
+  input:
+    type: mqtt
+    broker: default
+    topics:
+      - pattern: "video-analytics/detections"
+        qos: 1
+  stages:
+    - name: enrich
+      type: enrich
+      properties:
+        alwaysArray: false
+    - name: to-iothub
+      type: output/iotHub
+      properties:
+        systemTopicTemplate: "devices/{{input.deviceId}}/messages/events/"
+        authentication:
+          type: systemAssignedManagedIdentity
