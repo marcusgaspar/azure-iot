@@ -34,7 +34,7 @@ spec:
   authorizationEnabled: false
   port: 1883
   serviceName: aio-broker
-  serviceType: ClusterIp
+  serviceType: ClusterIP
 ---
 # DataPipeline: forward video-analytics detections to Azure IoT Hub
 apiVersion: dataprocessor.iotoperations.azure.com/v1alpha1

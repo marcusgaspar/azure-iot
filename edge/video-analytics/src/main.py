@@ -1,5 +1,5 @@
 """
-video_analytics.py
+main.py
 
 Edge video analytics module.
 
