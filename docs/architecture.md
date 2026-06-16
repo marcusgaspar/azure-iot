@@ -3,13 +3,28 @@
 ## Overview
 
 This solution deploys video analytics on edge Kubernetes clusters while
-providing centralised control through Azure IoT Hub.  Azure IoT Operations
+providing centralised control through Azure IoT Hub. Azure IoT Operations
 (AIO) acts as the messaging layer, routing telemetry from the edge to the
 cloud via MQTT.
 
 The main operational pain addressed is **automated container image updates on
 edge devices**, solved end-to-end through a GitOps pipeline powered by
 [Flux CD](https://fluxcd.io/).
+
+---
+
+## How It Works
+
+1. **Video analytics app** runs on the edge cluster, processes video frames, and
+   publishes detection results to the **AIO MQTT broker**.
+2. **AIO Data Processor** forwards messages to **Azure IoT Hub** for centralised
+   monitoring and control.
+3. When a developer pushes code, **GitHub Actions** builds a new container image
+   and pushes it to **Azure Container Registry (ACR)**.
+4. **Flux Image Automation** detects the new tag in ACR, updates the image
+   reference in the deployment manifest, and commits the change to Git.
+5. **Flux Kustomization** reconciles the cluster — no SSH, no manual `kubectl`
+   commands needed on edge devices.
 
 ---
 
@@ -65,29 +80,29 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 
 ### Azure Resources (`infra/`)
 
-| Resource | Purpose |
-|---|---|
-| **Azure IoT Hub** | Centralized device management, twin synchronisation, D2C telemetry ingest |
-| **Azure Container Registry (ACR)** | Private registry for edge container images |
-| **Azure Arc-connected cluster** | Brings the edge Kubernetes cluster under Azure management |
-| **AIO Extension** | Deploys MQTT broker + data processor + IoT Hub connector |
+| Resource                           | Purpose                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------- |
+| **Azure IoT Hub**                  | Centralized device management, twin synchronisation, D2C telemetry ingest |
+| **Azure Container Registry (ACR)** | Private registry for edge container images                                |
+| **Azure Arc-connected cluster**    | Brings the edge Kubernetes cluster under Azure management                 |
+| **AIO Extension**                  | Deploys MQTT broker + data processor + IoT Hub connector                  |
 
 ### Edge Components (`edge/`)
 
-| Component | Path | Description |
-|---|---|---|
-| **video-analytics** app | `edge/video-analytics/` | Python app: captures frames, runs object detection, publishes results via MQTT |
-| **Kubernetes manifests** | `edge/k8s/` | Namespace, Deployment, ConfigMap, Service |
-| **AIO MQTT broker** | `edge/k8s/aio/mqtt-broker.yaml` | BrokerListener + DataPipeline to IoT Hub |
+| Component                | Path                            | Description                                                                    |
+| ------------------------ | ------------------------------- | ------------------------------------------------------------------------------ |
+| **video-analytics** app  | `edge/video-analytics/`         | Python app: captures frames, runs object detection, publishes results via MQTT |
+| **Kubernetes manifests** | `edge/k8s/`                     | Namespace, Deployment, ConfigMap, Service                                      |
+| **AIO MQTT broker**      | `edge/k8s/aio/mqtt-broker.yaml` | BrokerListener + DataPipeline to IoT Hub                                       |
 
 ### GitOps (`gitops/`)
 
-| Resource | Description |
-|---|---|
-| **GitRepository** | Flux source pointing at this repo |
-| **Kustomization** | Reconciles `edge/k8s/` onto the cluster |
-| **ImageRepository** | Polls ACR for new image tags every minute |
-| **ImagePolicy** | Selects the newest semver tag (`>=0.1.0`) |
+| Resource                  | Description                                                          |
+| ------------------------- | -------------------------------------------------------------------- |
+| **GitRepository**         | Flux source pointing at this repo                                    |
+| **Kustomization**         | Reconciles `edge/k8s/` onto the cluster                              |
+| **ImageRepository**       | Polls ACR for new image tags every minute                            |
+| **ImagePolicy**           | Selects the newest semver tag (`>=0.1.0`)                            |
 | **ImageUpdateAutomation** | Commits the updated image tag back to Git; triggers a rolling update |
 
 ---
@@ -95,7 +110,7 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 ## Container Image Update Flow (GitOps)
 
 The key pain addressed is the manual process of SSHing into edge devices to
-pull and restart containers.  The automated flow is:
+pull and restart containers. The automated flow is:
 
 ```
 Developer pushes code
