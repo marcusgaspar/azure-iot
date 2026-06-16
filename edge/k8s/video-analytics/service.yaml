@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: video-analytics
+  namespace: video-analytics
+  labels:
+    app.kubernetes.io/name: video-analytics
+    app.kubernetes.io/part-of: azure-iot-demo
+spec:
+  selector:
+    app.kubernetes.io/name: video-analytics
+  ports:
+    - name: metrics
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

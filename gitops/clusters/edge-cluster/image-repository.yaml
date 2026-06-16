@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# Flux Image Reflector Controller – ImageRepository
+#
+# Polls ACR every minute and caches the available tags for the
+# video-analytics image.  The controller uses the ACR credentials stored
+# in the "acr-credentials" Secret (created by the bootstrap script).
+# ---------------------------------------------------------------------------
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: video-analytics
+  namespace: flux-system
+spec:
+  image: aiotdemoacr.azurecr.io/video-analytics
+  interval: 1m
+  secretRef:
+    name: acr-credentials

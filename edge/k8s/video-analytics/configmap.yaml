@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: video-analytics-config
+  namespace: video-analytics
+  labels:
+    app.kubernetes.io/name: video-analytics
+    app.kubernetes.io/part-of: azure-iot-demo
+data:
+  DETECTION_INTERVAL: "1.0"
+  # AIO MQTT broker service name within the cluster
+  MQTT_HOST: "aio-broker"
+  MQTT_PORT: "1883"
+  MQTT_TOPIC: "video-analytics/detections"
+  DEVICE_ID: "edge-device-01"
+  LOG_LEVEL: "INFO"

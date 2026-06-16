@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# Flux Image Reflector Controller – ImagePolicy
+#
+# Selects the newest semver tag (e.g., 1.2.3) from the ImageRepository.
+# Tags must follow the semver pattern produced by the CI workflow
+# (build-push-image.yml).
+# ---------------------------------------------------------------------------
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: video-analytics
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: video-analytics
+  policy:
+    semver:
+      range: ">=0.1.0"
