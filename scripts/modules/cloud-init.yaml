@@ -1,0 +1,94 @@
+#cloud-config
+# Rendered by scripts/modules/edge-vm.sh via envsubst in whitelist mode:
+#   envsubst '${ARC_CLUSTER_NAME} ${RESOURCE_GROUP} ${LOCATION}'
+# Only those three placeholders are substituted; every other $... (e.g.
+# $(seq 1 60), $(date -Iseconds), $VAR) is passed through untouched for the
+# shell to evaluate at boot time.
+package_update: true
+package_upgrade: false
+packages:
+  - curl
+  - jq
+  - ca-certificates
+  - apt-transport-https
+  - gnupg
+  - lsb-release
+write_files:
+  - path: /etc/sysctl.d/99-aio.conf
+    permissions: "0644"
+    content: |
+      fs.inotify.max_user_instances = 8192
+      fs.inotify.max_user_watches = 524288
+      fs.file-max = 100000
+runcmd:
+  # Make sure the bootstrap log exists from the very first step so it can be
+  # tailed live and inspected even if a later step fails.
+  - install -m 0644 /dev/null /var/log/edge-bootstrap.log
+  - echo "[bootstrap 0/8] cloud-init runcmd started at $(date -Iseconds)" | tee -a /var/log/edge-bootstrap.log
+
+  # 1) Apply kernel tunings required by AIO / K3s
+  - echo "[bootstrap 1/8] applying sysctl tunings (/etc/sysctl.d/99-aio.conf)" | tee -a /var/log/edge-bootstrap.log
+  - sysctl --system 2>&1 | tee -a /var/log/edge-bootstrap.log
+
+  # 2) Install Azure CLI (Microsoft's official installer)
+  - echo "[bootstrap 2/8] installing Azure CLI from aka.ms/InstallAzureCLIDeb" | tee -a /var/log/edge-bootstrap.log
+  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash 2>&1 | tee -a /var/log/edge-bootstrap.log
+
+  # 3) Install single-node K3s with world-readable kubeconfig and no Traefik
+  - echo "[bootstrap 3/8] installing single-node K3s (no traefik, kubeconfig 644)" | tee -a /var/log/edge-bootstrap.log
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode=644 --disable=traefik" sh - 2>&1 | tee -a /var/log/edge-bootstrap.log
+
+  # 4) Wait for the API server to become Ready (max ~5 min)
+  - echo "[bootstrap 4/8] waiting for K3s node to reach Ready state (max 5 min)" | tee -a /var/log/edge-bootstrap.log
+  - |
+    for i in $(seq 1 60); do
+      if KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl get nodes 2>/dev/null | grep -q ' Ready '; then
+        echo "[bootstrap 4/8] k3s is Ready after $((i*5))s" | tee -a /var/log/edge-bootstrap.log
+        break
+      fi
+      sleep 5
+    done
+
+  # 5) Login to Azure using the VM's system-assigned managed identity.
+  #    The MI was granted 'Reader' on the RG by edge-vm.sh, which makes the
+  #    subscription visible to 'az login --identity' -- no --allow-no-subscriptions
+  #    needed, and the active subscription is set automatically.
+  - echo "[bootstrap 5/8] az login --identity (system-assigned managed identity)" | tee -a /var/log/edge-bootstrap.log
+  - |
+    for i in $(seq 1 20); do
+      if az login --identity 2>&1 | tee -a /var/log/edge-bootstrap.log; then
+        echo "[bootstrap 5/8] MI login succeeded after $((i*15))s" | tee -a /var/log/edge-bootstrap.log
+        break
+      fi
+      echo "[bootstrap 5/8] MI not ready yet (attempt $i/20), sleeping 15s" | tee -a /var/log/edge-bootstrap.log
+      sleep 15
+    done
+
+  # 6) Install the connectedk8s CLI extension
+  - echo "[bootstrap 6/8] installing az CLI extension 'connectedk8s'" | tee -a /var/log/edge-bootstrap.log
+  - az extension add --name connectedk8s --yes --upgrade 2>&1 | tee -a /var/log/edge-bootstrap.log
+
+  # 7) Arc-enroll the K3s cluster. Retry to absorb RBAC propagation lag
+  #    (the role assignment on the MI happens AFTER the VM is created, so the
+  #    first attempts here may fail with AuthorizationFailed until AAD
+  #    propagates the role assignment -- usually 30-120s).
+  - echo "[bootstrap 7/8] Arc-enrolling cluster '${ARC_CLUSTER_NAME}' into RG '${RESOURCE_GROUP}' (${LOCATION})" | tee -a /var/log/edge-bootstrap.log
+  - |
+    for i in $(seq 1 10); do
+      if az connectedk8s connect \
+           --name "${ARC_CLUSTER_NAME}" \
+           --resource-group "${RESOURCE_GROUP}" \
+           --location "${LOCATION}" \
+           --kube-config /etc/rancher/k3s/k3s.yaml \
+           --tags "deployedBy=azcli" \
+           --yes \
+           2>&1 | tee -a /var/log/edge-bootstrap.log; then
+        echo "[bootstrap 7/8] Arc enroll succeeded on attempt $i" | tee -a /var/log/edge-bootstrap.log
+        break
+      fi
+      echo "[bootstrap 7/8] Arc enroll attempt $i/10 failed, sleeping 30s for RBAC to propagate" | tee -a /var/log/edge-bootstrap.log
+      sleep 30
+    done
+
+  # 8) Mark completion (poll this from outside to know when enrollment finishes)
+  - echo "[bootstrap 8/8] arc enrollment finished at $(date -Iseconds)" | tee -a /var/log/edge-bootstrap.log
