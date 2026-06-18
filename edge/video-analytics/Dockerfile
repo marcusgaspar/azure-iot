@@ -14,12 +14,6 @@ RUN pip install --no-cache-dir --upgrade pip \
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
 
-# Install OS-level packages needed by OpenCV
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      libglib2.0-0 \
-      libgl1 \
- && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -34,8 +28,7 @@ RUN useradd --uid 1000 --no-create-home appuser
 USER appuser
 
 # Default environment (override via Kubernetes ConfigMap / Secret)
-ENV VIDEO_SOURCE=0 \
-    DETECTION_INTERVAL=1.0 \
+ENV DETECTION_INTERVAL=1.0 \
     MQTT_HOST=aio-broker \
     MQTT_PORT=1883 \
     MQTT_TOPIC=video-analytics/detections \

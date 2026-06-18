@@ -1,0 +1,66 @@
+cd /mnt/c/_repo/azure-iot/video-analytics-demo/azure-iot/edge/video-analytics
+
+# 1. Build da imagem
+docker build --no-cache -t video-analytics:local .
+
+# 2. Rodar conectando ao broker local (host.docker.internal = sua máquina)
+#    Modo simulação: gera detecções aleatórias, sem necessidade de vídeo/câmera.
+docker run --rm \
+  -e MQTT_HOST=host.docker.internal \
+  -e MQTT_PORT=1883 \
+  -e DEVICE_ID=edge-device-local \
+  -e LOG_LEVEL=DEBUG \
+  video-analytics:local
+
+# Teste local da aplicacao - subir o Mosquitto em outro terminal
+docker run -it --rm --name mosquitto -p 1883:1883 eclipse-mosquitto
+
+# Teste local da aplicacao - subir o Mosquitto assinando um topico para receber as mensagens em outro terminal 
+docker exec -it mosquitto mosquitto_sub -t "video-analytics/detections" -v
+
+# Teste na VM edge
+az login
+# tag única para rastrear o deploy (ex.: data+commit)
+TAG="ver-$(date +%Y%m%d-%H%M%S)"
+echo $TAG
+
+# Opção A: rode a partir da pasta do app (já estamos em edge/video-analytics)
+cd /mnt/c/_repo/azure-iot/video-analytics-demo/azure-iot/edge/video-analytics
+
+az acr build \
+  --registry aiotdemoacr \
+  --image video-analytics:$TAG \
+  --image video-analytics:latest \
+  .
+
+# Na VM Edge — deploy manual (sem Flux)
+# Volte para a raiz do repo (os manifestos estão em edge/k8s):
+cd /mnt/c/_repo/azure-iot/video-analytics-demo/azure-iot
+
+# 1. Criar o namespace e aplicar os manifestos (namespace -> config/deploy/service)
+kubectl apply -f edge/k8s/namespace.yaml
+kubectl apply -f edge/k8s/video-analytics/
+
+# 2. (uma única vez) criar o secret de pull do ACR no namespace video-analytics
+#    O Deployment referencia imagePullSecrets: acr-pull-secret.
+ACR_NAME=aiotdemoacr
+ACR_USER=$(az acr credential show -n $ACR_NAME --query username -o tsv)
+ACR_PASS=$(az acr credential show -n $ACR_NAME --query 'passwords[0].value' -o tsv)
+kubectl create secret docker-registry acr-pull-secret \
+  --namespace video-analytics \
+  --docker-server=$ACR_NAME.azurecr.io \
+  --docker-username=$ACR_USER \
+  --docker-password=$ACR_PASS \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# 3. Apontar para a tag desta build e reiniciar
+kubectl set image deployment/video-analytics \
+  video-analytics=aiotdemoacr.azurecr.io/video-analytics:latest \
+  -n video-analytics
+
+kubectl rollout restart deployment/video-analytics -n video-analytics
+
+# 4. Verificar 
+kubectl rollout status deployment/video-analytics -n video-analytics
+kubectl get pods -n video-analytics
+kubectl logs -n video-analytics deployment/video-analytics -f

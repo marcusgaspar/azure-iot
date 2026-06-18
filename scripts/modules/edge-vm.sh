@@ -150,9 +150,10 @@ else
     --enable-secure-boot true --enable-vtpm true \
     --assign-identity '[system]' \
     --boot-diagnostics-storage '' \
-    --custom-data "$CLOUD_INIT_FILE" \
     --tags $TAGS_KV \
-    --output none
+    --output none    
+    #--custom-data "$CLOUD_INIT_FILE" \
+
 fi
 
 # ---------------------------------------------------------------------------
@@ -216,6 +217,6 @@ FQDN=$(az network public-ip show \
   --query dnsSettings.fqdn -o tsv)
 
 log "Edge VM ready: ssh ${VM_ADMIN_USERNAME}@${PUBLIC_IP}   (FQDN: ${FQDN})"
-log "Cloud-init runs k3s install + Arc enroll. Tail: sudo tail -f /var/log/edge-bootstrap.log"
-log "Verify enrollment: az connectedk8s show -n $ARC_CLUSTER_NAME -g $RESOURCE_GROUP"
+#log "Cloud-init runs k3s install + Arc enroll. Tail: sudo tail -f /var/log/edge-bootstrap.log"
+#log "Verify enrollment: az connectedk8s show -n $ARC_CLUSTER_NAME -g $RESOURCE_GROUP"
 echo "$PUBLIC_IP"

@@ -1,15 +1,16 @@
 """
 main.py
 
-Edge video analytics module.
+Edge video analytics module (simulation mode).
 
-Captures frames from a camera (or a test video file), runs object detection,
-and publishes detection results to the AIO MQTT broker so they are forwarded
-to Azure IoT Hub.
+Simulates an object-detection pipeline: at a fixed interval it generates
+random detection results and publishes them to the AIO MQTT broker. No camera
+or video file is required – this is a self-contained demo workload.
 
 Environment variables (all optional – defaults shown):
-  VIDEO_SOURCE        Camera index or path to video file (default: 0)
   DETECTION_INTERVAL  Seconds between detections           (default: 1.0)
+  FRAME_WIDTH         Simulated frame width in pixels      (default: 1280)
+  FRAME_HEIGHT        Simulated frame height in pixels     (default: 720)
   MQTT_HOST           AIO MQTT broker service hostname
                       (default: aio-broker)
   MQTT_PORT           MQTT broker port                     (default: 1883)
@@ -23,23 +24,19 @@ Environment variables (all optional – defaults shown):
 import json
 import logging
 import os
+import random
 import time
 import uuid
 from datetime import datetime, timezone
 
-import cv2
 import paho.mqtt.client as mqtt
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-VIDEO_SOURCE: str | int = os.environ.get("VIDEO_SOURCE", 0)
-try:
-    VIDEO_SOURCE = int(VIDEO_SOURCE)  # type: ignore[assignment]
-except ValueError:
-    pass  # keep as file path string
-
 DETECTION_INTERVAL = float(os.environ.get("DETECTION_INTERVAL", "1.0"))
+FRAME_WIDTH = int(os.environ.get("FRAME_WIDTH", "1280"))
+FRAME_HEIGHT = int(os.environ.get("FRAME_HEIGHT", "720"))
 MQTT_HOST = os.environ.get("MQTT_HOST", "aio-broker")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "video-analytics/detections")
@@ -56,7 +53,7 @@ log = logging.getLogger("video-analytics")
 # Object detection (placeholder – swap in your real model)
 # ---------------------------------------------------------------------------
 
-def detect_objects(frame) -> list[dict]:
+def detect_objects() -> list[dict]:
     """
     Stub detector.  Replace this function with a real model call, e.g.
     ONNX Runtime, TensorFlow Lite, or an Azure Cognitive Services call.
@@ -66,14 +63,12 @@ def detect_objects(frame) -> list[dict]:
       confidence – float in [0, 1]
       bbox       – [x, y, width, height] in pixels
     """
-    # Demo: simulate a random detection every few frames so the demo
-    # produces visible output without a real model.
-    import random
-
+    # Demo: randomly emit a detection so the demo produces visible output
+    # without a real model or video source.
     if random.random() > 0.4:
         return []
 
-    h, w = frame.shape[:2]
+    w, h = FRAME_WIDTH, FRAME_HEIGHT
     return [
         {
             "label": random.choice(["person", "vehicle", "package"]),
@@ -150,39 +145,25 @@ def publish_detection(client: mqtt.Client, detections: list[dict], frame_id: int
 # ---------------------------------------------------------------------------
 
 def run() -> None:
-    log.info("Starting video analytics (device=%s, source=%s)", DEVICE_ID, VIDEO_SOURCE)
+    log.info("Starting video analytics (simulation mode, device=%s)", DEVICE_ID)
 
     mqtt_client = build_mqtt_client()
     connect_with_retry(mqtt_client)
 
-    cap = cv2.VideoCapture(VIDEO_SOURCE)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video source: {VIDEO_SOURCE}")
-
     frame_id = 0
-    last_detection_time = 0.0
 
     try:
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                log.warning("End of video stream or capture error – restarting capture.")
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                continue
-
             frame_id += 1
-            now = time.monotonic()
-            if now - last_detection_time >= DETECTION_INTERVAL:
-                detections = detect_objects(frame)
-                if detections:
-                    log.info("Frame %d: %d object(s) detected", frame_id, len(detections))
-                    publish_detection(mqtt_client, detections, frame_id)
-                last_detection_time = now
+            detections = detect_objects()
+            if detections:
+                log.info("Frame %d: %d object(s) detected", frame_id, len(detections))
+                publish_detection(mqtt_client, detections, frame_id)
+            time.sleep(DETECTION_INTERVAL)
 
     except KeyboardInterrupt:
         log.info("Shutting down.")
     finally:
-        cap.release()
         mqtt_client.loop_stop()
         mqtt_client.disconnect()
 
