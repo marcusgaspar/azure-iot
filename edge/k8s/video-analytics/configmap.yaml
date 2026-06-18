@@ -8,8 +8,12 @@ metadata:
     app.kubernetes.io/part-of: azure-iot-demo
 data:
   DETECTION_INTERVAL: "1.0"
-  # AIO MQTT broker service name within the cluster
-  MQTT_HOST: "aio-broker"
+  # AIO MQTT broker service name within the cluster.
+  # O listener padrão (aio-broker) usa TLS+SAT na 18883. Para o demo, usamos o
+  # listener for LoadBalancer (demo1883)
+  # que expõe a 1883 sem TLS/autenticação. FQDN é necessário pois o broker roda
+  # no namespace azure-iot-operations e este app roda em video-analytics.
+  MQTT_HOST: "demo1883.azure-iot-operations.svc.cluster.local"
   MQTT_PORT: "1883"
   MQTT_TOPIC: "video-analytics/detections"
   DEVICE_ID: "edge-device-01"
