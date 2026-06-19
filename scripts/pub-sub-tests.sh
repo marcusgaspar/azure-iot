@@ -3,6 +3,12 @@ kubectl run mqtt-sub --rm -it --restart=Never -n azure-iot-operations \
   --image=eclipse-mosquitto -- \
   mosquitto_sub -h demo1883.azure-iot-operations.svc.cluster.local -p 1883 -t "video-analytics/detections" -v
 
+kubectl delete pod mqtt-sub -n azure-iot-operations --ignore-not-found
+
+kubectl run mqtt-sub --rm -it --restart=Never -n azure-iot-operations \
+  --image=eclipse-mosquitto -- \
+  mosquitto_sub -h demo1883.azure-iot-operations.svc.cluster.local -p 1883 -t "azure-iot-operations/data/#" -v
+
 mosquitto_pub \
   --host aio-broker \
   --port 18883 \

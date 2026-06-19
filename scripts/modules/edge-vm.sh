@@ -102,7 +102,7 @@ fi
 # ---------------------------------------------------------------------------
 if ! az network public-ip show -g "$RESOURCE_GROUP" -n "$VM_PIP_NAME" >/dev/null 2>&1; then
   RG_HASH=$(printf '%s' "${SUBSCRIPTION_ID}-${RESOURCE_GROUP}" | sha256sum | cut -c1-8)
-  DNS_LABEL=$(echo "${BASE_NAME}-edge-${RG_HASH}" | tr '[:upper:]' '[:lower:]')
+  DNS_LABEL=$(echo "${BASE_NAME}-edge-${RG_HASH}-${INSTANCE_NUMBER_ID}" | tr '[:upper:]' '[:lower:]')
   log "Creating Public IP '$VM_PIP_NAME' (DNS label: $DNS_LABEL)"
   # shellcheck disable=SC2086
   az network public-ip create \

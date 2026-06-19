@@ -22,13 +22,9 @@ docker run -it --rm --name mosquitto -p 1883:1883 eclipse-mosquitto
 docker exec -it mosquitto mosquitto_sub -t "video-analytics/detections" -v
 
 
-
 ###############################################
-# Teste na VM edge
+# Criar um Broker Listerner for LoadBalance (no TLS, no authentication)
 ###############################################
-git clone https://github.com/marcusgaspar/azure-iot.git
-cd azure-iot/
-
 az login
 
 # Criar um Broker Listerner for LoadBalance (no TLS, no authentication)
@@ -42,6 +38,13 @@ az iot ops broker listener port add \
 az iot ops broker listener list \
   -g rg-iot-demo \
   --instance cluster-demo-vale-ops-instance
+
+
+###############################################
+# Teste na VM edge
+###############################################
+git clone https://github.com/marcusgaspar/azure-iot.git
+cd azure-iot/
 
 # 1. Build e push da imagem para o ACR
 # a partir da raiz do repo
@@ -90,6 +93,7 @@ kubectl rollout restart deployment/video-analytics -n video-analytics
 # 5. Verificar
 kubectl rollout status deployment/video-analytics -n video-analytics
 kubectl get pods -n video-analytics
+kubectl get pods -n azure-iot-operations
 kubectl logs -n video-analytics deployment/video-analytics -f
 kubectl api-resources | grep -i broker
 kubectl get brokerlistener -A
