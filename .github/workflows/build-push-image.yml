@@ -52,8 +52,26 @@ jobs:
           echo "semver=$SEMVER"       >> "$GITHUB_OUTPUT"
           echo "short_sha=$SHORT_SHA"  >> "$GITHUB_OUTPUT"
 
+      # ── Validate Azure credentials are configured ─────────────────────
+      - name: Check Azure credentials
+        id: creds-check
+        shell: bash
+        env:
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SUB_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ACR: ${{ vars.ACR_NAME }}
+        run: |
+          if [[ -n "$CLIENT_ID" && -n "$TENANT_ID" && -n "$SUB_ID" && -n "$ACR" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Azure credentials (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID) or ACR_NAME variable are not configured. Skipping Azure login and image push."
+          fi
+
       # ── Login to ACR via OIDC (no stored secrets) ─────────────────────
       - name: Azure login (OIDC)
+        if: steps.creds-check.outputs.configured == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -61,6 +79,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Login to Azure Container Registry
+        if: steps.creds-check.outputs.configured == 'true'
         run: az acr login --name "$ACR_NAME"
 
       # ── Build & push ───────────────────────────────────────────────────
@@ -71,7 +90,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: edge/video-analytics
-          push: ${{ github.ref_name == 'main' }}
+          push: ${{ github.ref_name == 'main' && steps.creds-check.outputs.configured == 'true' }}
           build-args: |
             APP_VERSION=${{ steps.tag.outputs.semver }}
           tags: |
@@ -84,7 +103,7 @@ jobs:
 
       # ── Summarise ──────────────────────────────────────────────────────
       - name: Job summary
-        if: github.ref_name == 'main'
+        if: github.ref_name == 'main' && steps.creds-check.outputs.configured == 'true'
         run: |
           echo "### ✅ Image pushed" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
