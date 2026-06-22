@@ -138,6 +138,7 @@ def publish_detection(client: mqtt.Client, detections: list[dict], frame_id: int
         log.warning("Failed to publish detection (rc=%d)", info.rc)
     else:
         log.debug("Published %d detection(s) for frame %d", len(detections), frame_id)
+        log.debug("Payload: %s", json.dumps(payload))
 
 
 # ---------------------------------------------------------------------------
