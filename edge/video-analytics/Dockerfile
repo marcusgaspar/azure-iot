@@ -27,12 +27,17 @@ COPY src/ ./src/
 RUN useradd --uid 1000 --no-create-home appuser
 USER appuser
 
+# Application version, injected at build time:
+#   az acr build --build-arg APP_VERSION=0.1.0 ...
+ARG APP_VERSION=dev
+
 # Default environment (override via Kubernetes ConfigMap / Secret)
 ENV DETECTION_INTERVAL=1.0 \
     MQTT_HOST=aio-broker \
     MQTT_PORT=1883 \
     MQTT_TOPIC=video-analytics/detections \
     DEVICE_ID=edge-device-01 \
+    APP_VERSION=${APP_VERSION} \
     LOG_LEVEL=INFO
 
 ENTRYPOINT ["python", "src/main.py"]

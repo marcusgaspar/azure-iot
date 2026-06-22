@@ -250,3 +250,41 @@ kubectl run mqtt-sub --rm -it --restart=Never \
   mosquitto_sub -h demo1883 -p 1883 -t "video-analytics/detections" -v
 
 kubectl delete pod mqtt-sub -n azure-iot-operations --ignore-not-found
+
+
+
+# Teste de atualização de imagem
+# 1. Build com a versão (incremente o semver a cada build):
+cd /home/azureadmin/azure-iot/edge/video-analytics
+
+VERSION=0.1.1
+az acr build --registry aiotdemoacr \
+  --image video-analytics:$VERSION \
+  --image video-analytics:latest \
+  --build-arg APP_VERSION=$VERSION \
+  .
+
+# 2. Deixe o GitOps fazer o trabalho — o Flux vai detectar a tag, 
+# reescrever o deployment.yaml:26 para 0.1.1, commitar no Git e reconciliar o cluster:
+# acompanhe a detecção da nova imagem
+flux reconcile image repository video-analytics -n flux-system --timeout=2m
+flux get image policy video-analytics -n flux-system          # deve mostrar 0.1.1
+
+# acompanhe o commit automático do Flux
+git -C /home/azureadmin/azure-iot pull
+git -C /home/azureadmin/azure-iot log --oneline -3
+
+# 3. Veja a versão no log:
+# acompanhe o rollout no cluster
+kubectl rollout status deployment/video-analytics -n video-analytics
+
+# Saída esperada:
+# ... INFO video-analytics – Starting video analytics (simulation mode, device=edge-device-01, version=0.1.1)
+
+
+# 4. Ver a versão no payload via assinante MQTT
+kubectl delete pod mqtt-sub -n azure-iot-operations --ignore-not-found
+kubectl run mqtt-sub --rm -it --restart=Never \
+  -n azure-iot-operations \
+  --image=eclipse-mosquitto -- \
+  mosquitto_sub -h demo1883 -p 1883 -t "video-analytics/detections" -v

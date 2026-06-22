@@ -18,6 +18,8 @@ Environment variables (all optional – defaults shown):
                       (default: video-analytics/detections)
   DEVICE_ID           Identifier reported in every message
                       (default: edge-device-01)
+  APP_VERSION         Application version (set at build time via the
+                      Docker build-arg APP_VERSION)        (default: dev)
   LOG_LEVEL           Python logging level                  (default: INFO)
 """
 
@@ -41,6 +43,7 @@ MQTT_HOST = os.environ.get("MQTT_HOST", "aio-broker")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "video-analytics/detections")
 DEVICE_ID = os.environ.get("DEVICE_ID", "edge-device-01")
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
@@ -128,6 +131,7 @@ def connect_with_retry(client: mqtt.Client, max_retries: int = 10) -> None:
 def publish_detection(client: mqtt.Client, detections: list[dict], frame_id: int) -> None:
     payload = {
         "deviceId": DEVICE_ID,
+        "version": APP_VERSION,
         "messageId": str(uuid.uuid4()),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "frameId": frame_id,
@@ -146,7 +150,11 @@ def publish_detection(client: mqtt.Client, detections: list[dict], frame_id: int
 # ---------------------------------------------------------------------------
 
 def run() -> None:
-    log.info("Starting video analytics (simulation mode, device=%s)", DEVICE_ID)
+    log.info(
+        "Starting video analytics (simulation mode, device=%s, version=%s)",
+        DEVICE_ID,
+        APP_VERSION,
+    )
 
     mqtt_client = build_mqtt_client()
     connect_with_retry(mqtt_client)
