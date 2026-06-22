@@ -101,6 +101,19 @@ flux bootstrap github \
   --components-extra=image-reflector-controller,image-automation-controller
 
 # ---------------------------------------------------------------------------
+# 2b) Git credentials for the custom GitRepository (gitrepository.yaml)
+#     The bootstrap creates its own 'flux-system' source secret, but the
+#     custom GitRepository 'azure-iot-demo' references 'git-credentials'.
+#     Image automation also needs write access to push commits back to Git.
+# ---------------------------------------------------------------------------
+echo "==> Creating git-credentials secret for the custom GitRepository"
+kubectl create secret generic git-credentials \
+  --namespace flux-system \
+  --from-literal=username=git \
+  --from-literal=password="$GITHUB_TOKEN" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# ---------------------------------------------------------------------------
 # 3) ACR pull credentials for Flux Image Reflector + workloads
 # ---------------------------------------------------------------------------
 echo "==> Creating ACR pull credentials for Flux Image Reflector"
