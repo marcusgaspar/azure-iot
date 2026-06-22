@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: video-analytics
-          image: aiotdemoacr.azurecr.io/video-analytics:0.1.4 # {"$imagepolicy": "flux-system:video-analytics"}
+          image: aiotdemoacr.azurecr.io/video-analytics:0.1.5 # {"$imagepolicy": "flux-system:video-analytics"}
           imagePullPolicy: Always
           envFrom:
             - configMapRef:
