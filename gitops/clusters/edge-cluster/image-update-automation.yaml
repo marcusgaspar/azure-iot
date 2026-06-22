@@ -30,7 +30,7 @@ spec:
         name: flux-image-automation
         email: flux@azure-iot-demo
       messageTemplate: |
-        chore: update video-analytics image to {{range .Updated.Images}}{{.}}{{end}}
+        chore: update video-analytics image to {{range .Changed.Images}}{{.}}{{end}}
     push:
       branch: main
   update:
