@@ -99,13 +99,13 @@ A integração **não é no nível de "device"** — é no nível de **fluxo de 
 │                                                                        │
 │   Equipamentos          AIO                                            │
 │   (OPC UA, câmeras) ──► Connectors ──► aio-broker (MQTT) ──► Dataflow ─┼──┐
-│   app video-analytics ──────────────►  (barramento local)             │  │
-└────────────────────────────────────────────────────────────────────-─┘  │
-                                                                           │
-                          NUVEM AZURE                                      │
-        ┌────────────────────────────────────────────────────┐           │
-        │  Event Hubs  /  Microsoft Fabric  /  ADLS  /  ...   │ ◄─────────┘
-        │  (e, se quiser, IoT Hub via endpoint EH-compat)     │
+│   app video-analytics ──────────────►  (barramento local)              │  │
+└────────────────────────────────────────────────────────────────────────┘  │
+                                                                            │
+                          NUVEM AZURE                                       │
+        ┌────────────────────────────────────────────────────┐              │
+        │  Event Hubs  /  Microsoft Fabric  /  ADLS  /  ...  │ ◄────────────┘
+        │  (e, se quiser, IoT Hub via endpoint EH-compat)    │
         └────────────────────────────────────────────────────┘
 ```
 

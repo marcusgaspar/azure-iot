@@ -1,11 +1,12 @@
-# Architecture: Azure IoT Hub + Azure IoT Operations (Video Analytics Demo)
+# Architecture: Azure IoT Operations (Video Analytics Demo)
 
 ## Overview
 
-This solution deploys video analytics on edge Kubernetes clusters while
-providing centralised control through Azure IoT Hub. Azure IoT Operations
-(AIO) acts as the messaging layer, routing telemetry from the edge to the
-cloud via MQTT.
+This solution deploys video analytics on edge Kubernetes clusters. Azure IoT
+Operations (AIO) acts as the edge data plane: it processes detections locally on
+the MQTT broker and forwards only the relevant data to the cloud via a dataflow
+to **Azure Event Hubs**. Centralised management of the edge cluster itself is
+handled by **Azure Arc**, not by a cloud device-management service.
 
 The main operational pain addressed is **automated container image updates on
 edge devices**, solved end-to-end through a GitOps pipeline powered by
@@ -17,8 +18,8 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 
 1. **Video analytics app** runs on the edge cluster, processes video frames, and
    publishes detection results to the **AIO MQTT broker**.
-2. **AIO Data Processor** forwards messages to **Azure IoT Hub** for centralised
-   monitoring and control.
+2. **AIO Dataflow** forwards the processed messages to **Azure Event Hubs** in
+   the cloud for downstream consumption (Fabric, ADLS, stream processing, etc.).
 3. When a developer pushes code, **GitHub Actions** builds a new container image
    and pushes it to **Azure Container Registry (ACR)**.
 4. **Flux Image Automation** detects the new tag in ACR, updates the image
@@ -31,47 +32,49 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 ## High-Level Architecture
 
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                          AZURE CLOUD                                       │
-│                                                                            │
-│  ┌──────────────┐    telemetry    ┌──────────────────────────────────┐    │
-│  │  Azure IoT   │◄───────────────│  Azure Container Registry (ACR)  │    │
-│  │     Hub      │                └──────────────────────────────────┘    │
-│  └──────┬───────┘                         ▲  container images            │
-│         │ device twin / C2D commands       │                              │
-│         │                        ┌─────────┴────────────┐                │
-│         │                        │   GitHub Actions CI   │                │
-│         │                        │  (build-push-image)   │                │
-│         │                        └──────────────────────┘                │
-└─────────┼──────────────────────────────────────────────────────────────────┘
-          │ MQTT (via AIO connector)
-┌─────────┼──────────────────────────────────────────────────────────────────┐
-│         │          EDGE KUBERNETES CLUSTER (Arc-enrolled)                  │
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          AZURE CLOUD                                      │
+│                                                                           │
+│  ┌──────────────┐                 ┌──────────────────────────────────┐    │
+│  │ Azure Event  │                 │  Azure Container Registry (ACR)  │    │
+│  │     Hubs     │                 └──────────────────────────────────┘    │
+│  └──────▲───────┘                   ▲ push        │ pull                  │
+│         │ consumed by               │ image       │ image                 │
+│         │ Fabric / ADLS / ...       │             │                       │
+│         │                  ┌────────┴──────────┐  │                       │
+│         │                  │  GitHub Actions   │  │                       │
+│         │                  │ (build-push-image)│  │                       │
+│         │                  └───────────────────┘  │                       │
+└─────────┼─────────────────────────────────────────┼───────────────────────┘
+          │ AIO Dataflow                            │ image pull
+          │ (MQTT → Event Hubs)                     │ (by Kubernetes)
+┌─────────┼─────────────────────────────────────────▼───────────────────────┐
+│         │          EDGE KUBERNETES CLUSTER (Arc-enrolled)                 │
 │  ┌──────┴─────────────────────────────────────┐                           │
-│  │        Azure IoT Operations (AIO)           │                           │
-│  │                                             │                           │
+│  │        Azure IoT Operations (AIO)          │                           │
+│  │                                            │                           │
 │  │  ┌─────────────┐    ┌────────────────────┐ │                           │
-│  │  │ MQTT Broker │◄───│  Data Processor     │ │                           │
-│  │  │  (aio-broker│    │  (video-analytics-  │ │                           │
-│  │  │  :1883)     │    │   pipeline)         │ │                           │
+│  │  │ MQTT Broker │◄───│  Data Processor    │ │                           │
+│  │  │  (aio-broker│    │  (video-analytics- │ │                           │
+│  │  │  :1883)     │    │   pipeline)        │ │                           │
 │  │  └──────▲──────┘    └────────────────────┘ │                           │
-│  │         │ MQTT publish                      │                           │
-│  └─────────┼───────────────────────────────────┘                           │
-│            │                                                               │
+│  │         │ MQTT publish                     │                           │
+│  └─────────┼──────────────────────────────────┘                           │
+│            │                                                              │
 │  ┌─────────┴──────────────────────────────────┐                           │
-│  │     video-analytics Deployment              │                           │
-│  │     (Pod: captures frames → detects →       │                           │
-│  │      publishes to AIO MQTT broker)          │                           │
-│  └─────────────────────────────────────────────┘                           │
-│                                                                            │
-│  ┌─────────────────────────────────────────────┐                           │
-│  │  Flux CD  (image-reflector + image-automation│                           │
-│  │  + source-controller + kustomize-controller) │                           │
-│  │                                             │                           │
-│  │  Watches ACR → detects new image tag →      │                           │
-│  │  commits updated deployment.yaml → reconciles│                           │
-│  └─────────────────────────────────────────────┘                           │
-└────────────────────────────────────────────────────────────────────────────┘
+│  │     video-analytics Deployment             │                           │
+│  │     (Pod: captures frames → detects →      │                           │
+│  │      publishes to AIO MQTT broker)         │                           │
+│  └────────────────────────────────────────────┘                           │
+│                                                                           │
+│  ┌──────────────────────────────────────────────┐                         │
+│  │  Flux CD  (image-reflector + image-automation│                         │
+│  │  + source-controller + kustomize-controller) │                         │
+│  │                                              │                         │
+│  │  Watches ACR → detects new image tag →       │                         │
+│  │  commits updated deployment.yaml → reconciles│                         │
+│  └──────────────────────────────────────────────┘                         │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -80,12 +83,12 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 
 ### Azure Resources (`infra/`)
 
-| Resource                           | Purpose                                                                   |
-| ---------------------------------- | ------------------------------------------------------------------------- |
-| **Azure IoT Hub**                  | Centralized device management, twin synchronisation, D2C telemetry ingest |
-| **Azure Container Registry (ACR)** | Private registry for edge container images                                |
-| **Azure Arc-connected cluster**    | Brings the edge Kubernetes cluster under Azure management                 |
-| **AIO Extension**                  | Deploys MQTT broker + data processor + IoT Hub connector                  |
+| Resource                           | Purpose                                                                |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| **Azure Event Hubs**               | Cloud ingestion endpoint for processed telemetry from the AIO dataflow |
+| **Azure Container Registry (ACR)** | Private registry for edge container images                             |
+| **Azure Arc-connected cluster**    | Brings the edge Kubernetes cluster under Azure management              |
+| **AIO Extension**                  | Deploys MQTT broker + data processor + dataflow to Event Hubs          |
 
 ### Edge Components (`edge/`)
 
@@ -93,7 +96,7 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 | ------------------------ | ------------------------------- | ------------------------------------------------------------------------------ |
 | **video-analytics** app  | `edge/video-analytics/`         | Python app: captures frames, runs object detection, publishes results via MQTT |
 | **Kubernetes manifests** | `edge/k8s/`                     | Namespace, Deployment, ConfigMap, Service                                      |
-| **AIO MQTT broker**      | `edge/k8s/aio/mqtt-broker.yaml` | BrokerListener + DataPipeline to IoT Hub                                       |
+| **AIO MQTT broker**      | `edge/k8s/aio/mqtt-broker.yaml` | BrokerListener + Dataflow to Event Hubs                                        |
 
 ### GitOps (`gitops/`)
 
@@ -157,8 +160,8 @@ video-analytics pod
   → PUBLISH to "video-analytics/detections" (QoS 1)
       → AIO MQTT Broker (aio-broker:1883)
           → AIO Data Processor (video-analytics-pipeline)
-              → AIO IoT Hub Connector
-                  → Azure IoT Hub (D2C messages)
+              → AIO Dataflow
+                  → Azure Event Hubs (cloud ingestion)
 ```
 
 Sample detection message published by the app:
@@ -188,7 +191,7 @@ azure-iot/
 ├── infra/                        Infrastructure as Code (Bicep)
 │   ├── main.bicep
 │   ├── modules/
-│   │   ├── iothub.bicep
+│   │   ├── eventhubs.bicep
 │   │   ├── acr.bicep
 │   │   └── aio.bicep
 │   └── parameters/
@@ -205,7 +208,7 @@ azure-iot/
 │       │   ├── deployment.yaml   ← image tag updated by Flux
 │       │   └── service.yaml
 │       └── aio/
-│           └── mqtt-broker.yaml  AIO broker + pipeline config
+│           └── mqtt-broker.yaml  AIO broker + dataflow config
 ├── gitops/
 │   └── clusters/edge-cluster/    Flux configuration
 │       ├── gitrepository.yaml
@@ -258,8 +261,12 @@ az acr build \
 # 4. Watch Flux reconcile
 flux get all -A
 
-# 5. Monitor IoT Hub telemetry
-az iot hub monitor-events --hub-name aiotdemo-iothub
+# 5. Monitor cloud telemetry on Event Hubs
+az eventhubs eventhub consumer-group show \
+  --resource-group rg-azure-iot-demo \
+  --namespace-name aiotdemo-eventhubs \
+  --eventhub-name detections \
+  --name '$Default'
 ```
 
 ---
