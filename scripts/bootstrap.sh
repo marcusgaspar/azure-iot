@@ -116,13 +116,57 @@ kubectl create secret generic git-credentials \
 # ---------------------------------------------------------------------------
 # 3) ACR pull credentials for Flux Image Reflector + workloads
 # ---------------------------------------------------------------------------
-echo "==> Creating ACR pull credentials for Flux Image Reflector"
-ACR_TOKEN=$(az acr token create \
+# The Flux image-reflector-controller lists tags via the ACR metadata API
+# (GET /v2/<repo>/tags/list), which requires the "metadata/read" permission.
+# The built-in "_repositories_pull" scope map only grants "content/read"
+# (enough for `docker pull`, but NOT for listing tags), so we use a dedicated
+# scope map that grants BOTH content/read and metadata/read.
+IMAGE_REPO="video-analytics"
+ACR_SCOPE_MAP="flux-pull"
+
+echo "==> Ensuring ACR scope-map '$ACR_SCOPE_MAP' grants content/read + metadata/read"
+if ! az acr scope-map show --name "$ACR_SCOPE_MAP" --registry "$ACR_NAME" >/dev/null 2>&1; then
+  az acr scope-map create \
+    --name "$ACR_SCOPE_MAP" \
+    --registry "$ACR_NAME" \
+    --repository "$IMAGE_REPO" content/read metadata/read \
+    -o none
+else
+  az acr scope-map update \
+    --name "$ACR_SCOPE_MAP" \
+    --registry "$ACR_NAME" \
+    --add-repository "$IMAGE_REPO" content/read metadata/read \
+    -o none
+fi
+
+echo "==> Ensuring ACR token 'flux-image-pull' exists and uses '$ACR_SCOPE_MAP'"
+# Idempotent: create the token only if it does not exist yet. `az acr token
+# create` fails if the token already exists, so we guard it and ensure an
+# existing token points at the correct scope map.
+if ! az acr token show --name flux-image-pull --registry "$ACR_NAME" >/dev/null 2>&1; then
+  az acr token create \
+    --name flux-image-pull \
+    --registry "$ACR_NAME" \
+    --scope-map "$ACR_SCOPE_MAP" \
+    -o none
+else
+  az acr token update \
+    --name flux-image-pull \
+    --registry "$ACR_NAME" \
+    --scope-map "$ACR_SCOPE_MAP" \
+    -o none
+fi
+
+echo "==> Generating a fresh password for the ACR token"
+# Always (re)generate a password so the Kubernetes Secret holds a valid one,
+# even on repeated runs where the original password was never stored.
+ACR_TOKEN=$(az acr token credential generate \
   --name flux-image-pull \
   --registry "$ACR_NAME" \
-  --scope-map _repositories_pull \
-  --query "credentials.passwords[0].value" -o tsv)
+  --password1 \
+  --query "passwords[0].value" -o tsv)
 
+echo "==> Creating ACR pull credentials for Flux Image Reflector"
 kubectl create secret docker-registry acr-credentials \
   --namespace flux-system \
   --docker-server="$ACR_LOGIN_SERVER" \
