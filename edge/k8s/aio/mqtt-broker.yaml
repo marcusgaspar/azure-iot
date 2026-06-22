@@ -1,37 +1,26 @@
-# AIO MQTT Broker configuration for the video-analytics namespace.
+# AIO MQTT Broker — NOT managed via GitOps.
 #
-# Azure IoT Operations deploys an MQ broker cluster-wide.  This
-# BrokerListener exposes an unauthenticated port for in-cluster workloads
-# in dev/test environments.  For production, enable TLS and authentication.
+# Azure IoT Operations (AIO) provisions the default MQTT broker
+# ("default" in namespace azure-iot-operations) automatically when AIO is
+# installed. There is no need to declare the Broker/BrokerListener here.
 #
-# API reference:
-# https://learn.microsoft.com/azure/iot-operations/manage-mqtt-broker/overview-iot-mq
----
-apiVersion: mq.iotoperations.azure.com/v1beta1
-kind: Broker
-metadata:
-  name: default
-  namespace: azure-iot-operations
-spec:
-  mode: distributed
-  cardinality:
-    backendChain:
-      partitions: 2
-      redundancyFactor: 2
-      workers: 2
-    frontend:
-      replicas: 2
-      workers: 2
----
-apiVersion: mq.iotoperations.azure.com/v1beta1
-kind: BrokerListener
-metadata:
-  name: non-tls-listener
-  namespace: azure-iot-operations
-spec:
-  brokerRef: default
-  authenticationEnabled: false
-  authorizationEnabled: false
-  port: 1883
-  serviceName: aio-broker
-  serviceType: ClusterIP
+# The non-TLS port (1883) used by the video-analytics demo is provisioned
+# with the Azure CLI as a separate listener ("demo1883"):
+#
+#   az iot ops broker listener port add \
+#     --resource-group <rg> \
+#     --instance <aio-instance> \
+#     --listener demo1883 \
+#     --service-type LoadBalancer \
+#     --port 1883
+#
+# The workload connects to it via:
+#   demo1883.azure-iot-operations.svc.cluster.local:1883
+# (see edge/k8s/video-analytics/configmap.yaml -> MQTT_HOST).
+#
+# NOTE: A previous version declared a Broker/BrokerListener using the
+# retired API group "mq.iotoperations.azure.com/v1beta1". That API no longer
+# exists in current AIO releases (the GA API group is
+# "mqttbroker.iotoperations.azure.com"), so those resources were removed to
+# keep the Flux Kustomization reconciling cleanly.
+
