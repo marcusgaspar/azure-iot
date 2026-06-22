@@ -42,8 +42,10 @@ jobs:
         run: |
           if [[ -n "${{ github.event.inputs.image_tag }}" ]]; then
             TAG="${{ github.event.inputs.image_tag }}"
+          elif [[ "${{ github.ref_name }}" == "main" ]]; then
+            TAG="$(echo $GITHUB_SHA | cut -c1-7)"
           else
-            TAG="${{ github.ref_name == 'main' && '' || 'pr-' }}$(echo $GITHUB_SHA | cut -c1-7)"
+            TAG="pr-$(echo $GITHUB_SHA | cut -c1-7)"
           fi
           # Also derive a semver from the latest Git tag (for GitOps policy)
           LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
@@ -51,8 +53,33 @@ jobs:
           echo "short_tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "semver=$SEMVER"  >> "$GITHUB_OUTPUT"
 
+      # ── Check required configuration ───────────────────────────────────
+      - name: Check Azure credentials and ACR configuration
+        id: prereqs
+        env:
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          missing=""
+          [[ -z "$ACR_NAME" ]]   && missing="$missing ACR_NAME(var)"
+          [[ -z "$CLIENT_ID" ]]  && missing="$missing AZURE_CLIENT_ID(secret)"
+          [[ -z "$TENANT_ID" ]]  && missing="$missing AZURE_TENANT_ID(secret)"
+          if [[ -n "$missing" ]]; then
+            echo "::warning::Missing configuration:$missing -- image will be built but not pushed to ACR."
+            echo "push_enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "push_enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+          # Compute image base reference for Docker tags
+          if [[ -n "$ACR_NAME" ]]; then
+            echo "image_base=${ACR_NAME}.azurecr.io/${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_base=${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
+          fi
+
       # ── Login to ACR via OIDC (no stored secrets) ─────────────────────
       - name: Azure login (OIDC)
+        if: steps.prereqs.outputs.push_enabled == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -60,6 +87,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Login to Azure Container Registry
+        if: steps.prereqs.outputs.push_enabled == 'true'
         run: az acr login --name "$ACR_NAME"
 
       # ── Build & push ───────────────────────────────────────────────────
@@ -70,18 +98,18 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: edge/video-analytics
-          push: ${{ github.ref_name == 'main' }}
+          push: ${{ github.ref_name == 'main' && steps.prereqs.outputs.push_enabled == 'true' }}
           tags: |
-            ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.short_tag }}
-            ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.semver }}
-            ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:latest
+            ${{ steps.prereqs.outputs.image_base }}:${{ steps.tag.outputs.short_tag }}
+            ${{ steps.prereqs.outputs.image_base }}:${{ steps.tag.outputs.semver }}
+            ${{ steps.prereqs.outputs.image_base }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
 
       # ── Summarise ──────────────────────────────────────────────────────
       - name: Job summary
-        if: github.ref_name == 'main'
+        if: github.ref_name == 'main' && steps.prereqs.outputs.push_enabled == 'true'
         run: |
           echo "### ✅ Image pushed" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
