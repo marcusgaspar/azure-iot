@@ -26,3 +26,35 @@ cd /mnt/c/_repo/azure-iot/video-analytics-demo/azure-iot   # raiz do repo no WSL
 
 # 5. Rodar o bootstrap pulando o deploy
 SKIP_DEPLOY=1 bash scripts/bootstrap.sh
+
+# Troubleshooting
+
+source scripts/.env
+kubectl create secret generic git-credentials \
+  -n flux-system \
+  --from-literal=username=git \
+  --from-literal=password=$GITHUB_TOKEN \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+flux reconcile source git azure-iot-demo -n flux-system
+flux get all -A
+
+
+kubectl get secret git-credentials -n flux-system
+
+kubectl get secret acr-credentials -n flux-system
+
+
+ACR_NAME=aiotdemoacr
+ACR_TOKEN=$(az acr token create \
+  --name flux-image-pull \
+  --registry $ACR_NAME \
+  --scope-map _repositories_pull \
+  --query "credentials.passwords[0].value" -o tsv)
+
+kubectl create secret docker-registry acr-credentials \
+  --namespace flux-system \
+  --docker-server=$ACR_NAME.azurecr.io \
+  --docker-username=flux-image-pull \
+  --docker-password="$ACR_TOKEN" \
+  --dry-run=client -o yaml | kubectl apply -f -
