@@ -17,6 +17,6 @@ data:
   #MQTT_HOST: "aio-broker.azure-iot-operations.svc.cluster.local"
   #MQTT_HOST: "10.20.0.4"
   MQTT_PORT: "1883"
-  MQTT_TOPIC: "video-analytics/detections"
+  MQTT_TOPIC: "video-analytics/detections/edge-device-01"
   DEVICE_ID: "edge-device-01"
   LOG_LEVEL: "INFO"
