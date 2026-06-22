@@ -7,8 +7,8 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m
-  url: https://github.com/<YOUR_ORG>/azure-iot  # replace with your fork URL
+  url: https://github.com/marcusgaspar/azure-iot # replace with your fork URL
   ref:
     branch: main
   secretRef:
-    name: git-credentials           # PAT or SSH key stored as a K8s Secret
+    name: git-credentials # PAT or SSH key stored as a K8s Secret

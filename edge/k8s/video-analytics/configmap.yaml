@@ -14,6 +14,8 @@ data:
   # que expõe a 1883 sem TLS/autenticação. FQDN é necessário pois o broker roda
   # no namespace azure-iot-operations e este app roda em video-analytics.
   MQTT_HOST: "demo1883.azure-iot-operations.svc.cluster.local"
+  #MQTT_HOST: "aio-broker.azure-iot-operations.svc.cluster.local"
+  #MQTT_HOST: "10.20.0.4"
   MQTT_PORT: "1883"
   MQTT_TOPIC: "video-analytics/detections"
   DEVICE_ID: "edge-device-01"
