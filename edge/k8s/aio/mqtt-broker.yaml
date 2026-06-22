@@ -35,29 +35,3 @@ spec:
   port: 1883
   serviceName: aio-broker
   serviceType: ClusterIP
----
-# DataPipeline: forward video-analytics detections to Azure IoT Hub
-apiVersion: dataprocessor.iotoperations.azure.com/v1alpha1
-kind: Pipeline
-metadata:
-  name: video-analytics-pipeline
-  namespace: azure-iot-operations
-spec:
-  enabled: true
-  input:
-    type: mqtt
-    broker: default
-    topics:
-      - pattern: "video-analytics/detections"
-        qos: 1
-  stages:
-    - name: enrich
-      type: enrich
-      properties:
-        alwaysArray: false
-    - name: to-iothub
-      type: output/iotHub
-      properties:
-        systemTopicTemplate: "devices/{{input.deviceId}}/messages/events/"
-        authentication:
-          type: systemAssignedManagedIdentity
