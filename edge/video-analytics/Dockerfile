@@ -29,10 +29,10 @@ USER appuser
 
 # Application version, injected at build time:
 #   az acr build --build-arg APP_VERSION=0.1.0 ...
-ARG APP_VERSION=dev
+ARG APP_VERSION=0.1.6
 
 # Default environment (override via Kubernetes ConfigMap / Secret)
-ENV DETECTION_INTERVAL=1.0 \
+ENV DETECTION_INTERVAL=3.0 \
     MQTT_HOST=aio-broker \
     MQTT_PORT=1883 \
     MQTT_TOPIC=video-analytics/detections \
