@@ -1,19 +1,12 @@
-# Flux Kustomization: tells Flux which path in the repo to reconcile and
-# in what order (namespace first, then workloads).
-apiVersion: kustomize.toolkit.fluxcd.io/v1
+# Kustomize index (NOT a Flux Kustomization). This is the file that
+# `flux bootstrap` builds via `kustomize build ./gitops/clusters/edge-cluster`.
+# It must use apiVersion kustomize.config.k8s.io/v1beta1 and simply lists the
+# Flux custom resources that live in this directory.
+apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-metadata:
-  name: video-analytics
-  namespace: flux-system
-spec:
-  interval: 5m
-  sourceRef:
-    kind: GitRepository
-    name: azure-iot-demo
-  path: ./edge/k8s
-  prune: true           # delete resources removed from Git
-  timeout: 2m
-  # Substitute the ACR login server at deploy time so manifests stay generic
-  postBuild:
-    substitute:
-      ACR_LOGIN_SERVER: "aiotdemoacr.azurecr.io"
+resources:
+  - gitrepository.yaml
+  - video-analytics-sync.yaml
+  - image-repository.yaml
+  - image-policy.yaml
+  - image-update-automation.yaml
