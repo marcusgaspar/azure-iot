@@ -20,10 +20,10 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # required for OIDC-based ACR login
+  id-token: write # required for OIDC-based ACR login
 
 env:
-  ACR_NAME: ${{ vars.ACR_NAME }}            # e.g. aiotdemoacr
+  ACR_NAME: ${{ vars.ACR_NAME }} # e.g. aiotdemoacr
   IMAGE_NAME: video-analytics
 
 jobs:
@@ -40,16 +40,17 @@ jobs:
       - name: Set image tag
         id: tag
         run: |
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
           if [[ -n "${{ github.event.inputs.image_tag }}" ]]; then
-            TAG="${{ github.event.inputs.image_tag }}"
+            SEMVER="${{ github.event.inputs.image_tag }}"
           else
-            TAG="${{ github.ref_name == 'main' && '' || 'pr-' }}$(echo $GITHUB_SHA | cut -c1-7)"
+            # Monotonically increasing semver so the Flux ImagePolicy (>=0.1.0,
+            # selects the highest) detects every new build. Patch = run number.
+            # Minor is 0.2 to stay above the earlier manual 0.1.x builds.
+            SEMVER="0.2.${GITHUB_RUN_NUMBER}"
           fi
-          # Also derive a semver from the latest Git tag (for GitOps policy)
-          LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-          SEMVER="${LATEST_TAG:-0.1.0}"
-          echo "short_tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "semver=$SEMVER"  >> "$GITHUB_OUTPUT"
+          echo "semver=$SEMVER"       >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA"  >> "$GITHUB_OUTPUT"
 
       # ── Login to ACR via OIDC (no stored secrets) ─────────────────────
       - name: Azure login (OIDC)
@@ -71,9 +72,11 @@ jobs:
         with:
           context: edge/video-analytics
           push: ${{ github.ref_name == 'main' }}
+          build-args: |
+            APP_VERSION=${{ steps.tag.outputs.semver }}
           tags: |
-            ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.short_tag }}
             ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.semver }}
+            ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.short_sha }}
             ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -89,8 +92,8 @@ jobs:
           echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Registry | \`$ACR_NAME.azurecr.io\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Image | \`$IMAGE_NAME\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Tag (SHA) | \`${{ steps.tag.outputs.short_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Tag (semver) | \`${{ steps.tag.outputs.semver }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag (SHA) | \`${{ steps.tag.outputs.short_sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Flux Image Automation will detect this new tag and automatically" >> "$GITHUB_STEP_SUMMARY"
           echo "update the deployment on the edge cluster." >> "$GITHUB_STEP_SUMMARY"
