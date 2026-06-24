@@ -6,11 +6,13 @@ on:
       - main
     paths:
       - "edge/video-analytics/**"
+      - "edge/k8s/video-analytics/configmap.yaml"
   pull_request:
     branches:
       - main
     paths:
       - "edge/video-analytics/**"
+      - "edge/k8s/video-analytics/configmap.yaml"
   workflow_dispatch:
     inputs:
       image_tag:
@@ -44,11 +46,19 @@ jobs:
           if [[ -n "${{ github.event.inputs.image_tag }}" ]]; then
             SEMVER="${{ github.event.inputs.image_tag }}"
           else
-            # Monotonically increasing semver so the Flux ImagePolicy (>=0.1.0,
-            # selects the highest) detects every new build. Patch = run number.
-            # Minor is 0.2 to stay above the earlier manual 0.1.x builds.
-            SEMVER="0.2.${GITHUB_RUN_NUMBER}"
+            # Single source of truth: APP_VERSION defined in the ConfigMap.
+            # The CI tag (and build-arg) follows whatever you set there, so the
+            # image tag, the build-arg and the runtime env all stay in sync.
+            SEMVER=$(grep -E '^[[:space:]]*APP_VERSION:' \
+              edge/k8s/video-analytics/configmap.yaml \
+              | head -n1 \
+              | sed -E 's/.*APP_VERSION:[[:space:]]*"?([^"]+)"?.*/\1/')
+            if [[ -z "$SEMVER" ]]; then
+              echo "::error::APP_VERSION not found in edge/k8s/video-analytics/configmap.yaml"
+              exit 1
+            fi
           fi
+          echo "Using image tag: $SEMVER"
           echo "semver=$SEMVER"       >> "$GITHUB_OUTPUT"
           echo "short_sha=$SHORT_SHA"  >> "$GITHUB_OUTPUT"
 

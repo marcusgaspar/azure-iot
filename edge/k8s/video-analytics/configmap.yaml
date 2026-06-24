@@ -7,7 +7,8 @@ metadata:
     app.kubernetes.io/name: video-analytics
     app.kubernetes.io/part-of: azure-iot-demo
 data:
-  DETECTION_INTERVAL: "1.0"
+  DETECTION_INTERVAL: "5.0"
+  APP_VERSION: "0.2.9"
   # AIO MQTT broker service name within the cluster.
   # O listener padrão (aio-broker) usa TLS+SAT na 18883. Para o demo, usamos o
   # listener for LoadBalancer (demo1883)
