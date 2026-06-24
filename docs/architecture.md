@@ -10,9 +10,9 @@ to **Azure Event Hubs**. From there, the telemetry is ingested into
 through a **Real-Time Dashboard**. Centralised management of the edge cluster
 itself is handled by **Azure Arc**, not by a cloud device-management service.
 
-The main operational pain addressed is **automated container image updates on
-edge devices**, solved end-to-end through a GitOps pipeline powered by
-[Flux CD](https://fluxcd.io/).
+The **automated container image updates on
+edge devices** is solved end-to-end through a GitOps pipeline powered by
+[Flux CD](https://fluxcd.io/) and GitHub Actions.
 
 ---
 
@@ -92,14 +92,6 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 │  └───────────────────────────────────────────────┘                                    │
 └───────────────────────────────────────────────────────────────────────────────────────┘
 ```
-
-> Fluxo de telemetria (lado esquerdo): a aplicação no edge publica no broker MQTT
-> da AIO; o **AIO Dataflow** encaminha para o **Azure Event Hubs**; o
-> **Microsoft Fabric** consome o Event Hub via **Eventstream**, persiste no
-> **Eventhouse (KQL DB)** e exibe no **Real-Time Dashboard**.
-> Fluxo de imagem (lado direito): **GitHub Actions** faz _push_ da imagem para o
-> **ACR**; o Kubernetes do edge faz _pull_ da imagem; o **Flux** detecta a nova
-> tag e atualiza o deployment.
 
 ---
 
@@ -222,6 +214,7 @@ Sample detection message published by the app:
 ```json
 {
   "deviceId": "edge-device-01",
+  "version": "1.2.3",
   "messageId": "3f2e1a0b-...",
   "timestamp": "2024-06-16T12:00:00.000Z",
   "frameId": 42,
