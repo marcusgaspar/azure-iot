@@ -1,0 +1,254 @@
+// ===========================================================================
+// Real-Time Dashboard - Video Analytics Detections
+// ===========================================================================
+// Fluxo de dados:
+//   AIO dataflow -> Event Hubs (detections) -> Eventstream (event-stream-iot)
+//   -> Eventhouse / KQL DB -> Real-Time Dashboard
+//
+// Schema do evento (payload publicado por edge/video-analytics/src/main.py):
+//   {
+//     "deviceId":  "string",
+//     "version":   "string",
+//     "messageId": "uuid",
+//     "timestamp": "ISO-8601 UTC",
+//     "frameId":   int,
+//     "detections": [ { "label": "string",
+//                       "confidence": double,
+//                       "bbox": [x, y, w, h] } ]   // 0 ou 1 item por frame
+//   }
+//
+// IMPORTANTE:
+//   * A tabela no Eventhouse se chama "detections" (mesmo nome da coluna do
+//     array). Isso NAO e problema: o primeiro "detections" e a TABELA e, dentro
+//     do mv-expand, "detections" e a COLUNA. Aliasamos para "det" por clareza.
+//   * Schema confirmado (getschema):
+//       deviceId   string
+//       version    string
+//       messageId  guid
+//       timestamp  datetime   <- ja e datetime, nao precisa de todatetime
+//       frameId    string
+//       detections dynamic    <- o array [ { label, confidence, bbox[] } ]
+//   * Cada tile do Real-Time Dashboard recebe UMA query. Copie cada bloco
+//     abaixo para um tile separado e escolha o tipo de visual indicado.
+// ===========================================================================
+
+
+// ---------------------------------------------------------------------------
+// PASSO 0 - DESCOBERTA (rode no KQL Queryset, nao no dashboard)
+// Use para confirmar o nome da tabela e como os campos aterrissaram.
+// ---------------------------------------------------------------------------
+
+// Lista as tabelas do banco:
+// .show tables
+
+// Schema da tabela (veja se 'detections' veio como dynamic e se 'timestamp'
+// veio como string ou datetime):
+detections
+| getschema
+
+// Amostra crua dos ultimos eventos:
+detections
+| take 20
+
+// COMO LER O QUE ESTA DENTRO DA COLUNA 'detections' (array dynamic):
+// use mv-expand para desempacotar o array (1 linha por objeto detectado),
+// depois acesse os campos com ponto (.label) e o bbox por indice ([0..3]).
+// Lembre de converter o tipo (tostring/todouble/toint), pois dentro de
+// 'dynamic' os valores nao tem tipo definido.
+detections
+| mv-expand det = detections
+| extend
+    label      = tostring(det.label),
+    confidence = todouble(det.confidence),
+    x = toint(det.bbox[0]),   // bbox = [x, y, w, h]
+    y = toint(det.bbox[1]),
+    w = toint(det.bbox[2]),
+    h = toint(det.bbox[3])
+| project timestamp, deviceId, frameId, label, confidence, x, y, w, h
+
+
+// ---------------------------------------------------------------------------
+// TILE 1 - KPI: total de deteccoes (no intervalo do dashboard)  [Stat / Card]
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| where isnotempty(detection)
+| summarize ['Deteccoes'] = count()
+
+
+// ---------------------------------------------------------------------------
+// TILE 2 - KPI: frames processados  [Stat / Card]
+// ---------------------------------------------------------------------------
+detections
+| summarize ['Frames processados'] = count()
+
+
+// ---------------------------------------------------------------------------
+// TILE 3 - KPI: taxa de deteccao (% de frames com objeto)  [Stat / Card]
+// ---------------------------------------------------------------------------
+detections
+| summarize Frames = count(),
+            ComDeteccao = countif(array_length(detections) > 0)
+| extend ['Taxa de deteccao (%)'] = round(100.0 * ComDeteccao / Frames, 1)
+| project ['Taxa de deteccao (%)']
+
+
+// ---------------------------------------------------------------------------
+// TILE 4 - Deteccoes por minuto  [Time chart]
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| where isnotempty(detection)
+| summarize Deteccoes = count() by bin(todatetime(timestamp), 1m)
+| render timechart
+
+
+// ---------------------------------------------------------------------------
+// TILE 5 - Throughput de frames por minuto  [Time chart]
+// ---------------------------------------------------------------------------
+detections
+| summarize Frames = count() by bin(todatetime(timestamp), 1m)
+| render timechart
+
+
+// ---------------------------------------------------------------------------
+// TILE 6 - Deteccoes por classe (label)  [Column chart / Bar chart]
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| extend label = tostring(detection.label)
+| where isnotempty(label)
+| summarize Total = count() by label
+| sort by Total desc
+| render columnchart
+
+
+// ---------------------------------------------------------------------------
+// TILE 7 - Distribuicao por classe  [Pie chart]
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| extend label = tostring(detection.label)
+| where isnotempty(label)
+| summarize Total = count() by label
+| render piechart
+
+
+// ---------------------------------------------------------------------------
+// TILE 8 - Confianca media por classe  [Column chart]
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| extend label = tostring(detection.label),
+         confidence = todouble(detection.confidence)
+| where isnotempty(label)
+| summarize ['Confianca media'] = round(avg(confidence), 3) by label
+| sort by ['Confianca media'] desc
+| render columnchart
+
+
+// ---------------------------------------------------------------------------
+// TILE 9 - Confianca media ao longo do tempo  [Time chart]
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| extend confidence = todouble(detection.confidence)
+| where isnotempty(detection)
+| summarize ['Confianca media'] = avg(confidence) by bin(todatetime(timestamp), 1m)
+| render timechart
+
+
+// ---------------------------------------------------------------------------
+// TILE 10 - Deteccoes por dispositivo  [Column chart]
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| where isnotempty(detection)
+| summarize Total = count() by deviceId
+| sort by Total desc
+| render columnchart
+
+
+// ---------------------------------------------------------------------------
+// TILE 11 - Ultimas deteccoes  [Table]
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| where isnotempty(detection)
+| extend label      = tostring(detection.label),
+         confidence = round(todouble(detection.confidence), 3),
+         bbox       = detection.bbox
+| project Hora = todatetime(timestamp), deviceId, frameId, label, confidence, bbox
+| sort by Hora desc
+| take 50
+
+
+// ---------------------------------------------------------------------------
+// TILE 12 - Tamanho medio do objeto (area do bbox) por classe  [Column chart]
+// bbox = [x, y, w, h]  ->  area = w * h
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| extend label = tostring(detection.label),
+         w = toint(detection.bbox[2]),
+         h = toint(detection.bbox[3])
+| where isnotempty(label)
+| summarize ['Area media (px2)'] = round(avg(w * h), 0) by label
+| sort by ['Area media (px2)'] desc
+| render columnchart
+
+
+// ---------------------------------------------------------------------------
+// TILE 13 - Linha do tempo de deteccoes (cada deteccao = 1 ponto)  [Scatter chart]
+// Cada deteccao individual aparece como um ponto no tempo. O eixo Y mostra a
+// confianca e cada classe (label) vira uma serie/cor distinta. Passe o mouse
+// sobre o ponto para ver os detalhes (deviceId, frameId).
+// Dica: no Real-Time Dashboard escolha o visual "Scatter chart" e defina
+//   X = timestamp, Y = confidence, Series = label.
+// ---------------------------------------------------------------------------
+detections
+| mv-expand detection = detections
+| where isnotempty(detection)
+| extend label      = tostring(detection.label),
+         confidence = round(todouble(detection.confidence), 3)
+| project timestamp = todatetime(timestamp), confidence, label, deviceId, frameId
+| sort by timestamp asc
+| render scatterchart with (xcolumn = timestamp, ycolumns = confidence, series = label)
+
+
+// ---------------------------------------------------------------------------
+// TILE 14 - Latencia de ingestao (saude do pipeline)  [Time chart]
+// Diferenca entre o horario do evento e o horario de ingestao no Eventhouse.
+// Util para detectar atraso/acumulo no fluxo.
+// ---------------------------------------------------------------------------
+detections
+| extend ['Latencia (s)'] = datetime_diff('second', ingestion_time(), todatetime(timestamp))
+| summarize ['Latencia media (s)'] = avg(['Latencia (s)']) by bin(ingestion_time(), 1m)
+| render timechart
+
+
+// ---------------------------------------------------------------------------
+// TILE 15 - Cada requisicao dos ultimos 30 minutos (timeline)  [Scatter chart]
+// As requisicoes/frames recebidos na ultima meia hora sao agrupados por minuto.
+// O eixo Y mostra quantos objetos foram detectados no minuto e cada dispositivo
+// (deviceId) vira uma serie/cor distinta.
+// Dica: no Real-Time Dashboard escolha o visual "Scatter chart" e defina
+//   X = Hora, Y = Objetos, Series = deviceId.
+// ---------------------------------------------------------------------------
+detections
+| where todatetime(timestamp) >= ago(30m)
+| extend Hora = bin(todatetime(timestamp), 1m),
+         Objetos = array_length(detections)
+| summarize Objetos = sum(Objetos) by Hora, deviceId
+| sort by Hora asc
+| render scatterchart with (xcolumn = Hora, ycolumns = Objetos, series = deviceId)
+
+
+// ---------------------------------------------------------------------------
+// TILE 16 - Volume de requisicoes nos ultimos 30 minutos  [Time chart]
+// Quantidade de mensagens/frames recebidos por minuto na ultima meia hora.
+// ---------------------------------------------------------------------------
+detections
+| where todatetime(timestamp) >= ago(30m)
+| summarize ['Requisicoes'] = count() by bin(todatetime(timestamp), 1m)
+| render timechart

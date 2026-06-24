@@ -5,8 +5,10 @@
 This solution deploys video analytics on edge Kubernetes clusters. Azure IoT
 Operations (AIO) acts as the edge data plane: it processes detections locally on
 the MQTT broker and forwards only the relevant data to the cloud via a dataflow
-to **Azure Event Hubs**. Centralised management of the edge cluster itself is
-handled by **Azure Arc**, not by a cloud device-management service.
+to **Azure Event Hubs**. From there, the telemetry is ingested into
+**Microsoft Fabric** (Eventstream → Eventhouse) and visualised in near real time
+through a **Real-Time Dashboard**. Centralised management of the edge cluster
+itself is handled by **Azure Arc**, not by a cloud device-management service.
 
 The main operational pain addressed is **automated container image updates on
 edge devices**, solved end-to-end through a GitOps pipeline powered by
@@ -19,12 +21,19 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 1. **Video analytics app** runs on the edge cluster, processes video frames, and
    publishes detection results to the **AIO MQTT broker**.
 2. **AIO Dataflow** forwards the processed messages to **Azure Event Hubs** in
-   the cloud for downstream consumption (Fabric, ADLS, stream processing, etc.).
-3. When a developer pushes code, **GitHub Actions** builds a new container image
+   the cloud for downstream consumption.
+3. **Microsoft Fabric Eventstream** connects to the Event Hub as a source and
+   streams the detection events into the platform.
+4. **Fabric Eventhouse (KQL Database)** persists the events, making them
+   queryable with KQL.
+5. **Real-Time Dashboard** runs KQL queries against the Eventhouse to display
+   live detections, throughput, and per-class metrics (see
+   [`dashboards/realtime-detections.kql`](../dashboards/realtime-detections.kql)).
+6. When a developer pushes code, **GitHub Actions** builds a new container image
    and pushes it to **Azure Container Registry (ACR)**.
-4. **Flux Image Automation** detects the new tag in ACR, updates the image
+7. **Flux Image Automation** detects the new tag in ACR, updates the image
    reference in the deployment manifest, and commits the change to Git.
-5. **Flux Kustomization** reconciles the cluster — no SSH, no manual `kubectl`
+8. **Flux Kustomization** reconciles the cluster — no SSH, no manual `kubectl`
    commands needed on edge devices.
 
 ---
@@ -32,50 +41,88 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 ## High-Level Architecture
 
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│                          AZURE CLOUD                                      │
-│                                                                           │
-│  ┌──────────────┐                 ┌──────────────────────────────────┐    │
-│  │ Azure Event  │                 │  Azure Container Registry (ACR)  │    │
-│  │     Hubs     │                 └──────────────────────────────────┘    │
-│  └──────▲───────┘                   ▲ push        │ pull                  │
-│         │ consumed by               │ image       │ image                 │
-│         │ Fabric / ADLS / ...       │             │                       │
-│         │                  ┌────────┴──────────┐  │                       │
-│         │                  │  GitHub Actions   │  │                       │
-│         │                  │ (build-push-image)│  │                       │
-│         │                  └───────────────────┘  │                       │
-└─────────┼─────────────────────────────────────────┼───────────────────────┘
-          │ AIO Dataflow                            │ image pull
-          │ (MQTT → Event Hubs)                     │ (by Kubernetes)
-┌─────────┼─────────────────────────────────────────▼───────────────────────┐
-│         │          EDGE KUBERNETES CLUSTER (Arc-enrolled)                 │
-│  ┌──────┴─────────────────────────────────────┐                           │
-│  │        Azure IoT Operations (AIO)          │                           │
-│  │                                            │                           │
-│  │  ┌─────────────┐    ┌────────────────────┐ │                           │
-│  │  │ MQTT Broker │◄───│  Data Processor    │ │                           │
-│  │  │  (aio-broker│    │  (video-analytics- │ │                           │
-│  │  │  :1883)     │    │   pipeline)        │ │                           │
-│  │  └──────▲──────┘    └────────────────────┘ │                           │
-│  │         │ MQTT publish                     │                           │
-│  └─────────┼──────────────────────────────────┘                           │
-│            │                                                              │
-│  ┌─────────┴──────────────────────────────────┐                           │
-│  │     video-analytics Deployment             │                           │
-│  │     (Pod: captures frames → detects →      │                           │
-│  │      publishes to AIO MQTT broker)         │                           │
-│  └────────────────────────────────────────────┘                           │
-│                                                                           │
-│  ┌──────────────────────────────────────────────┐                         │
-│  │  Flux CD  (image-reflector + image-automation│                         │
-│  │  + source-controller + kustomize-controller) │                         │
-│  │                                              │                         │
-│  │  Watches ACR → detects new image tag →       │                         │
-│  │  commits updated deployment.yaml → reconciles│                         │
-│  └──────────────────────────────────────────────┘                         │
-└───────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────────────┐
+│                                  AZURE CLOUD                                          │
+│                                                                                       │
+│  ┌──────────────────────  MICROSOFT FABRIC  ────────────────────┐                     │
+│  │  ┌───────────────┐   ┌───────────────┐   ┌───────────────┐   │                     │
+│  │  │  Eventstream  │ → │   Eventhouse  │ → │   Real-Time   │   │                     │
+│  │  │ (event-stream-│   │ (KQL Database │   │   Dashboard   │   │                     │
+│  │  │     iot)      │   │  'detections')│   │               │   │                     │
+│  │  └───────────────┘   └───────────────┘   └───────────────┘   │                     │
+│  └──────▲───────────────────────────────────────────────────────┘                     │
+│         │ source                                                                      │
+│  ┌──────┴──────┐                          ┌──────────────────────────────┐            │
+│  │ Azure Event │                          │   Azure Container Registry   │            │
+│  │    Hubs     │                          │            (ACR)             │            │
+│  └──────▲──────┘                          └─────────▲───────────────┬────┘            │
+│         │                                           │ push image    │ pull image      │
+│         │ AIO Dataflow                     ┌────────┴──────────┐    │                 │
+│         │ (MQTT → Event Hubs)              │  GitHub Actions   │    │                 │
+│         │                                  │ (build-push-image)│    │                 │
+│         │                                  └───────────────────┘    │                 │
+└─────────┼───────────────────────────────────────────────────────────┼─────────────────┘
+          │                                                           │
+          │ AIO Dataflow                                              │ image pull
+          │                                                           │ (by Kubernetes)
+┌─────────┼───────────────────────────────────────────────────────────▼─────────────────┐
+│         │           EDGE KUBERNETES CLUSTER (Arc-enrolled)                            │
+│  ┌──────┴─────────────────────────────────────┐                                       │
+│  │        Azure IoT Operations (AIO)          │                                       │
+│  │                                            │                                       │
+│  │  ┌─────────────┐    ┌────────────────────┐ │                                       │
+│  │  │ MQTT Broker │◄───│  Data Processor    │ │                                       │
+│  │  │  (aio-broker│    │  (video-analytics- │ │                                       │
+│  │  │  :1883)     │    │   pipeline)        │ │                                       │
+│  │  └──────▲──────┘    └────────────────────┘ │                                       │
+│  │         │ MQTT publish                     │                                       │
+│  └─────────┼──────────────────────────────────┘                                       │
+│            │                                                                          │
+│  ┌─────────┴──────────────────────────────────┐                                       │
+│  │     video-analytics Deployment             │                                       │
+│  │     (Pod: captures frames → detects →      │                                       │
+│  │      publishes to AIO MQTT broker)         │                                       │
+│  └────────────────────────────────────────────┘                                       │
+│  ┌───────────────────────────────────────────────┐                                    │
+│  │  Flux CD  (image-reflector + image-automation │                                    │
+│  │  + source-controller + kustomize-controller)  │                                    │
+│  │                                               │                                    │
+│  │  Watches ACR → detects new image tag →        │                                    │
+│  │  commits updated deployment.yaml → reconciles │                                    │
+│  └───────────────────────────────────────────────┘                                    │
+└───────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+> Fluxo de telemetria (lado esquerdo): a aplicação no edge publica no broker MQTT
+> da AIO; o **AIO Dataflow** encaminha para o **Azure Event Hubs**; o
+> **Microsoft Fabric** consome o Event Hub via **Eventstream**, persiste no
+> **Eventhouse (KQL DB)** e exibe no **Real-Time Dashboard**.
+> Fluxo de imagem (lado direito): **GitHub Actions** faz _push_ da imagem para o
+> **ACR**; o Kubernetes do edge faz _pull_ da imagem; o **Flux** detecta a nova
+> tag e atualiza o deployment.
+
+---
+
+## Real-Time Telemetry Flow (Edge → Fabric Dashboard)
+
+Once a detection leaves the edge, it travels through the following stages before
+it appears on the dashboard:
+
+```
+AIO Dataflow
+  → Azure Event Hubs (detections)            ← cloud ingestion endpoint
+      → Fabric Eventstream (event-stream-iot) ← connects to Event Hub as source
+          → Fabric Eventhouse / KQL DB        ← persists events in table 'detections'
+              → Real-Time Dashboard            ← KQL tiles render live metrics
+```
+
+| Stage               | Service                        | What happens                                                                                                                                                         |
+| ------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Edge forwarding  | **AIO Dataflow**               | Subscribes to the MQTT topic and forwards each detection message to Azure Event Hubs.                                                                                |
+| 2. Cloud ingestion  | **Azure Event Hubs**           | Acts as the scalable buffer/ingestion endpoint. The `detections` event hub receives the raw JSON events.                                                             |
+| 3. Stream ingestion | **Fabric Eventstream**         | The `event-stream-iot` Eventstream uses the Event Hub as a source and streams events into Fabric.                                                                    |
+| 4. Storage & query  | **Fabric Eventhouse (KQL DB)** | Events land in the `detections` table (the `detections` array stays as a `dynamic` column). Queryable via KQL.                                                       |
+| 5. Visualisation    | **Real-Time Dashboard**        | Each tile runs a KQL query (see `dashboards/realtime-detections.kql`) to show counts, per-class stats, timelines, and per-request views, with optional auto-refresh. |
 
 ---
 
@@ -86,6 +133,9 @@ edge devices**, solved end-to-end through a GitOps pipeline powered by
 | Resource                           | Purpose                                                                |
 | ---------------------------------- | ---------------------------------------------------------------------- |
 | **Azure Event Hubs**               | Cloud ingestion endpoint for processed telemetry from the AIO dataflow |
+| **Microsoft Fabric Eventstream**   | Streams events from the Event Hub source into Fabric                   |
+| **Microsoft Fabric Eventhouse**    | KQL Database that persists detection events for querying               |
+| **Real-Time Dashboard**            | KQL-driven dashboard visualising live detections and metrics           |
 | **Azure Container Registry (ACR)** | Private registry for edge container images                             |
 | **Azure Arc-connected cluster**    | Brings the edge Kubernetes cluster under Azure management              |
 | **AIO Extension**                  | Deploys MQTT broker + data processor + dataflow to Event Hubs          |
@@ -162,6 +212,9 @@ video-analytics pod
           → AIO Data Processor (video-analytics-pipeline)
               → AIO Dataflow
                   → Azure Event Hubs (cloud ingestion)
+                      → Fabric Eventstream (event-stream-iot)
+                          → Fabric Eventhouse / KQL DB (table 'detections')
+                              → Real-Time Dashboard (KQL tiles)
 ```
 
 Sample detection message published by the app:

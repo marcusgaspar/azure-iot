@@ -1,0 +1,44 @@
+{
+  "$schema": "Delta/1.0",
+  "type": "object",
+  "properties": {
+    "fields": [
+      {
+        "name": "deviceId",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      { "name": "version", "type": "string", "nullable": true, "metadata": {} },
+      {
+        "name": "messageId",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "timestamp",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "frameId",
+        "type": "integer",
+        "nullable": true,
+        "metadata": {}
+      },
+      { "name": "label", "type": "string", "nullable": true, "metadata": {} },
+      {
+        "name": "confidence",
+        "type": "double",
+        "nullable": true,
+        "metadata": {}
+      },
+      { "name": "bboxX", "type": "integer", "nullable": true, "metadata": {} },
+      { "name": "bboxY", "type": "integer", "nullable": true, "metadata": {} },
+      { "name": "bboxW", "type": "integer", "nullable": true, "metadata": {} },
+      { "name": "bboxH", "type": "integer", "nullable": true, "metadata": {} }
+    ]
+  }
+}
